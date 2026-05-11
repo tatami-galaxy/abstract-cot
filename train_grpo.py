@@ -105,56 +105,48 @@ class MaskedCoTGRPOTrainer(GRPOTrainer):
     completion outcome.
     """
 
-    def _find_answer_start_token_idx(self, input_ids: torch.Tensor, prompt_length: int) -> int | None:
-        """Find the token index where the answer starts (after </think>).
+    def _find_think_end_index(self, completion_ids: torch.Tensor) -> int | None:
+        """Find the index right after the last </think> in completion token ids.
 
-        Returns the index of the first token AFTER </think> in the completion,
-        relative to the full sequence. Returns None if </think> not found.
+        Returns the index into completion_ids of the first token AFTER </think>,
+        or None if </think> not found.
         """
         if not hasattr(self, "_think_end_ids"):
             self._think_end_ids = self.processing_class.encode(
                 "</think>", add_special_tokens=False
             )
 
-        completion_ids = input_ids[prompt_length:].tolist()
+        ids = completion_ids.tolist()
         tag_ids = self._think_end_ids
         tag_len = len(tag_ids)
 
         # Find last occurrence of the </think> token subsequence
         last_match = None
-        for i in range(len(completion_ids) - tag_len + 1):
-            if completion_ids[i : i + tag_len] == tag_ids:
+        for i in range(len(ids) - tag_len + 1):
+            if ids[i : i + tag_len] == tag_ids:
                 last_match = i
 
         if last_match is None:
             return None
 
-        return prompt_length + last_match + tag_len
+        return last_match + tag_len
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """Override to zero out CoT tokens in the completion mask."""
-        # Modify completion_mask in-place before loss computation
-        if "completion_mask" in inputs and "input_ids" in inputs:
+        # TRL 1.4.0 uses separate prompt_ids/completion_ids, not a single input_ids
+        if "completion_mask" in inputs and "completion_ids" in inputs:
             completion_mask = inputs["completion_mask"]
-            input_ids = inputs["input_ids"]
+            completion_ids = inputs["completion_ids"]
 
-            # Determine prompt length: completion starts where mask first becomes 1
-            batch_size = input_ids.shape[0]
-            for i in range(batch_size):
-                # Find where completion starts (first 1 in completion_mask)
-                nonzero = completion_mask[i].nonzero(as_tuple=True)[0]
-                if len(nonzero) == 0:
-                    continue
-                prompt_length = nonzero[0].item()
-
-                answer_start = self._find_answer_start_token_idx(input_ids[i], prompt_length)
+            for i in range(completion_ids.shape[0]):
+                answer_start = self._find_think_end_index(completion_ids[i])
 
                 if answer_start is None:
                     # No </think> found -- zero out entire completion (no gradient)
                     completion_mask[i] = 0
                 else:
-                    # Zero out everything from prompt_length to answer_start
-                    completion_mask[i, prompt_length:answer_start] = 0
+                    # Zero out CoT tokens, keep only answer tokens after </think>
+                    completion_mask[i, :answer_start] = 0
 
         return super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
 

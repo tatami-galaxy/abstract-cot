@@ -1,0 +1,2 @@
+{"step": 50, "rewards/reward_fn/mean": 0.54375, "rewards/reward_fn/std": 0.49744790494441987, "reward": 0.54375, "reward_std": 0.49744788408279417, "frac_reward_zero_std": 0.15}
+{"step": 100, "rewards/reward_fn/mean": 0.79375, "rewards/reward_fn/std": 0.3364988327026367, "reward": 0.79375, "reward_std": 0.3364988207817078, "frac_reward_zero_std": 0.55}
