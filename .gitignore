@@ -22,11 +22,6 @@ outputs/
 # Hugging Face cache
 .cache/
 
-# Logs
-*.log
-wandb/
-runs/
-
 # IDE
 .vscode/
 .idea/
