@@ -11,8 +11,7 @@ venv/
 .venv/
 env/
 
-# Model checkpoints and outputs
-outputs/
+# Model checkpoints (wherever they appear)
 *.pt
 *.pth
 *.bin
