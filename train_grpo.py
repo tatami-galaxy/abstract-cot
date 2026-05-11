@@ -111,24 +111,25 @@ class MaskedCoTGRPOTrainer(GRPOTrainer):
         Returns the index of the first token AFTER </think> in the completion,
         relative to the full sequence. Returns None if </think> not found.
         """
-        # Decode only the completion portion
-        completion_ids = input_ids[prompt_length:]
-        completion_text = self.processing_class.decode(completion_ids, skip_special_tokens=False)
+        if not hasattr(self, "_think_end_ids"):
+            self._think_end_ids = self.processing_class.encode(
+                "</think>", add_special_tokens=False
+            )
 
-        # Find last occurrence of </think>
-        tag = "</think>"
-        tag_pos = completion_text.rfind(tag)
-        if tag_pos == -1:
+        completion_ids = input_ids[prompt_length:].tolist()
+        tag_ids = self._think_end_ids
+        tag_len = len(tag_ids)
+
+        # Find last occurrence of the </think> token subsequence
+        last_match = None
+        for i in range(len(completion_ids) - tag_len + 1):
+            if completion_ids[i : i + tag_len] == tag_ids:
+                last_match = i
+
+        if last_match is None:
             return None
 
-        # Character position right after </think>
-        answer_char_start = tag_pos + len(tag)
-
-        # Encode the prefix up to (and including) </think> to count tokens
-        prefix_text = completion_text[:answer_char_start]
-        prefix_tokens = self.processing_class.encode(prefix_text, add_special_tokens=False)
-
-        return prompt_length + len(prefix_tokens)
+        return prompt_length + last_match + tag_len
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """Override to zero out CoT tokens in the completion mask."""
@@ -272,16 +273,15 @@ def build_dataset(split: str = "train", max_samples: int | None = None):
     if max_samples:
         ds = ds.select(range(min(max_samples, len(ds))))
 
-    gold_answers = {}
+    gold_answers = {
+        row["question"]: extract_gold_answer(row["answer"]) for row in ds
+    }
 
     def format_example(example):
-        question = example["question"]
-        gold = extract_gold_answer(example["answer"])
-        gold_answers[question] = gold
         return {
             "prompt": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": question},
+                {"role": "user", "content": example["question"]},
             ]
         }
 
@@ -297,17 +297,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description="GRPO with optional CoT masking")
     parser.add_argument("--mask_cot", action="store_true", help="Mask CoT tokens from loss")
     parser.add_argument("--run_name", type=str, default=None, help="Run name for logging")
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-1.7B")
     parser.add_argument("--max_samples", type=int, default=None, help="Limit training samples")
-    parser.add_argument("--num_generations", type=int, default=4, help="Completions per prompt")
-    parser.add_argument("--max_completion_length", type=int, default=512)
-    parser.add_argument("--num_train_epochs", type=int, default=1)
+    parser.add_argument("--num_generations", type=int, default=8, help="Completions per prompt")
+    parser.add_argument("--max_completion_length", type=int, default=2048)
+    parser.add_argument("--max_steps", type=int, default=500, help="Total training steps")
     parser.add_argument("--per_device_train_batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--learning_rate", type=float, default=5e-7)
+    parser.add_argument("--learning_rate", type=float, default=5e-6)
+    parser.add_argument("--logging_steps", type=int, default=1, help="Log metrics every N steps")
+    parser.add_argument("--save_steps", type=int, default=200, help="Save checkpoint every N steps")
     parser.add_argument("--log_every", type=int, default=50, help="Log completions every N steps")
     parser.add_argument("--output_dir", type=str, default=None)
-    parser.add_argument("--bf16", action="store_true", default=True)
+    parser.add_argument("--bf16", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--use_vllm", action="store_true", help="Use vLLM for faster generation")
+    parser.add_argument("--vllm_gpu_utilization", type=float, default=0.3, help="vLLM GPU memory utilization")
     return parser.parse_args()
 
 
@@ -350,19 +354,22 @@ def main():
     training_config = GRPOConfig(
         output_dir=args.output_dir,
         run_name=args.run_name,
-        num_train_epochs=args.num_train_epochs,
+        max_steps=args.max_steps,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         num_generations=args.num_generations,
         max_completion_length=args.max_completion_length,
-        logging_steps=1,
-        save_steps=200,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
         bf16=args.bf16,
         report_to="tensorboard",
         log_on_each_node=False,
         # GRPO specific
-        beta=0.1,  # KL penalty coefficient
+        beta=0.0,  # KL penalty coefficient
+        # vLLM
+        use_vllm=args.use_vllm,
+        vllm_gpu_memory_utilization=args.vllm_gpu_utilization,
     )
 
     # Choose trainer class
