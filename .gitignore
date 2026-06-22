@@ -1,0 +1,13 @@
+# Local model checkpoints, datasets, papers, and the virtualenv
+models/
+papers/
+data/
+.venv/
+
+# Training outputs and logs
+runs/
+logs/
+
+# Python
+__pycache__/
+*.pyc
