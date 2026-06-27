@@ -93,6 +93,7 @@ class AbstractColdStartGRPOTrainer(GRPOTrainer):
         logits_to_keep,
         batch_size=None,
         compute_entropy=False,
+        compute_aux_loss=False,  # MoE router aux loss; unused (cold-start is a dense model)
         **kwargs,  # swallow multimodal args; cold-start is text-only
     ):
         batch_size = batch_size or input_ids.size(0)
@@ -120,4 +121,6 @@ class AbstractColdStartGRPOTrainer(GRPOTrainer):
 
         logps = torch.cat(all_logps, dim=0)
         entropies = torch.cat(all_entropies, dim=0) if compute_entropy else None
-        return logps, entropies
+        # TRL >=1.x expects a 3-tuple (logps, entropies, aux_loss). Cold-start uses
+        # a dense model, so the MoE load-balancing aux loss is always None.
+        return logps, entropies, None
