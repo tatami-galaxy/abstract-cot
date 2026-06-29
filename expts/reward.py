@@ -23,6 +23,8 @@ def correctness_reward(prompts, completions, final_answer, problem=None, **kwarg
     problems = problem if problem is not None else [""] * len(completions)
     rewards = []
     for comp, gold, prob in zip(completions, final_answer, problems):
+        print(comp)
+        quit()
         pred = extract_boxed_answer(answer_segment(comp))
         rewards.append(1.0 if grade_answer(pred, gold, prob or "") else 0.0)
     return rewards

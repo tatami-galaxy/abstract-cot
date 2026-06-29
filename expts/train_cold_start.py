@@ -7,9 +7,14 @@ failure mode (abstract span carries no causal signal) with real diagnostics.
 Single GPU smoke test:
     CUDA_VISIBLE_DEVICES=0 python -m expts.train_cold_start --smoke
 
-Multi-GPU (DDP across 4 H100s):
-    CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes 4 \
-        -m expts.train_cold_start
+Multi-GPU DDP via the accelerate configs in config/:
+    # 2 GPUs
+    CUDA_VISIBLE_DEVICES=0,1 accelerate launch --config_file config/ddp_2gpu.yaml \
+        -m expts.train_cold_start --model-dir models/<your-model>
+
+    # 4 GPUs
+    CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --config_file config/ddp_4gpu.yaml \
+        -m expts.train_cold_start --model-dir models/<your-model>
 """
 
 import argparse
@@ -26,21 +31,21 @@ from .reward import correctness_reward, format_reward
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--model-dir", default="models/Qwen3.5-4B-Base")
-    ap.add_argument("--output-dir", default="runs/cold_start")
+    ap.add_argument("--model-dir", default="models/Qwen3.5-4B-Base") # local with abstract tokens
+    ap.add_argument("--output-dir", default="output/cold_start")
     ap.add_argument("--trace-len", type=int, default=16, help="T: forced abstract tokens per trace")
     ap.add_argument("--answer-budget", type=int, default=512, help="max answer tokens after END")
-    ap.add_argument("--num-train", type=int, default=8000)
+    ap.add_argument("--num-train", type=int, default=10000)
     ap.add_argument("--num-eval", type=int, default=500)
     ap.add_argument("--num-generations", type=int, default=8, help="GRPO group size G")
-    ap.add_argument("--per-device-batch", type=int, default=8)
-    ap.add_argument("--grad-accum", type=int, default=4)
+    ap.add_argument("--per-device-batch", type=int, default=1)
+    ap.add_argument("--grad-accum", type=int, default=16)
     ap.add_argument("--lr", type=float, default=1e-6)
     ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--max-steps", type=int, default=-1)
-    ap.add_argument("--logging-steps", type=int, default=1)
-    ap.add_argument("--save-steps", type=int, default=200)
-    ap.add_argument("--report-to", default="none")
+    ap.add_argument("--max-steps", type=int, default=500)
+    ap.add_argument("--logging-steps", type=int, default=10)
+    ap.add_argument("--save-steps", type=int, default=100)
+    ap.add_argument("--report-to", default="tensorboard")
     ap.add_argument("--diag-steps", type=int, default=50,
                     help="run counterfactual diagnostics every N steps (0 disables)")
     ap.add_argument("--num-probe", type=int, default=128, help="probe-set size for diagnostics")
@@ -57,7 +62,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
 
     train_ds, eval_ds = load_deepmath_grpo(
-        num_train=args.num_train, num_eval=args.num_eval
+        tokenizer, num_train=args.num_train, num_eval=args.num_eval
     )
 
     max_completion_length = args.trace_len + 2 + args.answer_budget
@@ -76,6 +81,7 @@ def main():
         save_steps=args.save_steps,
         bf16=True,
         gradient_checkpointing=True,
+        optim="adamw_8bit",  # bitsandbytes 8-bit AdamW: ~4x smaller optimizer state
         log_completions=True,
         num_completions_to_print=4,
         report_to=args.report_to,

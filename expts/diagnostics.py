@@ -45,7 +45,11 @@ from .reward import answer_segment
 
 @torch.no_grad()
 def _generate(generate_fn, tokenizer, prompts, processor, max_new_tokens, device):
-    enc = tokenizer(prompts, return_tensors="pt", padding=True, padding_side="left").to(device)
+    # add_special_tokens=False: prompts are already chat-template-formatted (the
+    # template supplies its own special tokens), matching TRL's prompt tokenization.
+    enc = tokenizer(
+        prompts, return_tensors="pt", padding=True, padding_side="left", add_special_tokens=False
+    ).to(device)
     processor.reset()
     out = generate_fn(
         **enc,
@@ -181,7 +185,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.model_dir, torch_dtype=torch.bfloat16).to(device)
     model.eval()
 
-    _, eval_ds = load_deepmath_grpo(num_train=1, num_eval=args.num_probe)
+    _, eval_ds = load_deepmath_grpo(tokenizer, num_train=1, num_eval=args.num_probe)
     prompts = eval_ds["prompt"]
     golds = eval_ds["final_answer"]
     problems = eval_ds["problem"]

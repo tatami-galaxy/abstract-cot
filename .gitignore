@@ -7,6 +7,8 @@ data/
 # Training outputs and logs
 runs/
 logs/
+config/
+output/
 
 # Python
 __pycache__/

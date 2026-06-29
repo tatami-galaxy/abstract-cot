@@ -93,8 +93,7 @@ class AbstractColdStartGRPOTrainer(GRPOTrainer):
         logits_to_keep,
         batch_size=None,
         compute_entropy=False,
-        compute_aux_loss=False,  # MoE router aux loss; unused (cold-start is a dense model)
-        **kwargs,  # swallow multimodal args; cold-start is text-only
+        **kwargs,  # absorb TRL's compute_aux_loss + multimodal args; cold-start is text-only
     ):
         batch_size = batch_size or input_ids.size(0)
         all_logps, all_entropies = [], []
